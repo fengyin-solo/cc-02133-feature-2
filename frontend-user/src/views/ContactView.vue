@@ -79,6 +79,50 @@
           </div>
           
           <div class="contact-form-wrapper">
+            <!-- 方案对照提示条 -->
+            <el-alert
+              v-if="compareProducts.length === 2"
+              class="compare-alert"
+              type="success"
+              :closable="false"
+              show-icon
+            >
+              <template #title>
+                <div class="compare-alert-title">
+                  <span>您正在咨询以下两项方案的对照：</span>
+                  <span class="compare-alert-tags">
+                    <el-tag
+                      v-for="product in compareProducts"
+                      :key="product.id"
+                      type="primary"
+                      effect="dark"
+                      size="small"
+                    >
+                      {{ product.shortTitle }}
+                    </el-tag>
+                  </span>
+                </div>
+              </template>
+              <div class="compare-alert-desc">
+                留言已为您预填对照咨询意向，可补充具体需求；
+                <router-link :to="compareBackLink">返回调整对照方案</router-link>
+              </div>
+            </el-alert>
+            <el-alert
+              v-else-if="compareProducts.length === 1"
+              class="compare-alert"
+              type="warning"
+              :closable="false"
+              show-icon
+            >
+              <template #title>
+                您已选择「{{ compareProducts[0].shortTitle }}」，方案对照需选择两项
+              </template>
+              <div class="compare-alert-desc">
+                <router-link :to="compareBackLink">返回产品页补选另一项方案</router-link>
+              </div>
+            </el-alert>
+
             <div class="form-card">
               <h3>在线留言</h3>
               <p class="form-desc">填写以下表单，我们将尽快与您联系</p>
@@ -179,13 +223,34 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import SectionTitle from '@/components/SectionTitle.vue'
+import { getProductById, parseCompareIds } from '@/data/products.js'
 
+const route = useRoute()
+const router = useRouter()
 const formRef = ref(null)
 const submitting = ref(false)
 const activeFaq = ref([])
+
+// 从产品页带入的方案对照结果（URL 参数为数据源，刷新 / 前进后退均可恢复）
+const compareIds = computed(() => parseCompareIds(route.query.compare))
+const compareProducts = computed(() => compareIds.value.map(getProductById))
+
+// 返回产品页时保留对照项
+const compareBackLink = computed(() => ({
+  path: '/products',
+  query: compareIds.value.length ? { compare: compareIds.value.join(',') } : {},
+  hash: '#compare-section'
+}))
+
+const buildCompareMessage = (ids) => {
+  if (ids.length !== 2) return ''
+  const [a, b] = ids.map(getProductById)
+  return `您好，我希望对「${a.shortTitle}（${a.title}）」与「${b.shortTitle}（${b.title}）」两项方案进行对照咨询，重点关注关键能力、技术优势与服务流程的差异，请安排专家与我联系，谢谢！`
+}
 
 const form = reactive({
   name: '',
@@ -214,7 +279,7 @@ const rules = {
 
 const handleSubmit = async () => {
   if (!formRef.value) return
-  
+
   await formRef.value.validate((valid) => {
     if (valid) {
       submitting.value = true
@@ -223,10 +288,33 @@ const handleSubmit = async () => {
         submitting.value = false
         ElMessage.success('留言提交成功，我们将尽快与您联系！')
         formRef.value.resetFields()
+        // resetFields 会恢复到初次绑定时的值，这里显式同步对照预填内容
+        form.message = buildCompareMessage(compareIds.value)
       }, 1500)
     }
   })
 }
+
+onMounted(() => {
+  // 规整无效对照参数
+  const normalized = parseCompareIds(route.query.compare)
+  if (String(route.query.compare || '') !== normalized.join(',')) {
+    const query = { ...route.query }
+    if (normalized.length) query.compare = normalized.join(',')
+    else delete query.compare
+    router.replace({ query, hash: route.hash || undefined })
+  }
+  // 进入页面即把对照结果带入咨询入口（预填，不覆盖用户已有内容）
+  form.message = buildCompareMessage(normalized)
+})
+
+// 前进 / 后退或外部改 URL 后同步预填内容（仅在留言为空或当前为自动预填时，不覆盖用户编辑）
+watch(() => route.query.compare, (raw, oldRaw) => {
+  const oldMessage = buildCompareMessage(parseCompareIds(oldRaw))
+  if (!form.message || form.message === oldMessage) {
+    form.message = buildCompareMessage(parseCompareIds(raw))
+  }
+})
 
 const faqs = [
   {
@@ -367,6 +455,30 @@ const faqs = [
 
 .contact-form-wrapper {
   flex: 0 0 480px;
+}
+
+.compare-alert {
+  margin-bottom: $spacing-md;
+  border-radius: $radius-lg;
+  align-items: center;
+}
+
+.compare-alert-title {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
+}
+
+.compare-alert-tags {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.compare-alert-desc {
+  font-size: $font-size-xs;
+  color: $text-secondary;
+  margin-top: 2px;
 }
 
 .form-card {

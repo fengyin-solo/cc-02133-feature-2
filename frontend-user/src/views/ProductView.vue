@@ -1,5 +1,5 @@
 <template>
-  <div class="product-page">
+  <div class="product-page" :class="{ 'has-compare-bar': compareIds.length > 0 }">
     <!-- 页面头部 -->
     <section class="page-header">
       <div class="container">
@@ -15,11 +15,12 @@
           >
             <el-icon :size="18"><component :is="product.icon" /></el-icon>
             {{ product.shortTitle }}
+            <span v-if="isComparing(product.id)" class="tab-compare-badge">对照中</span>
           </button>
         </div>
       </div>
     </section>
-    
+
     <!-- 产品列表 -->
     <section class="section section-light">
       <div class="container">
@@ -28,7 +29,10 @@
           :key="product.id"
           :id="`product-${product.id}`"
           class="product-detail"
-          :class="{ 'product-highlight': activeTab === product.id }"
+          :class="{
+            'product-highlight': activeTab === product.id,
+            'compare-selected': isComparing(product.id)
+          }"
         >
           <div class="product-content" :class="{ 'order-2': product.reverse }">
             <div class="product-tag">{{ product.tag }}</div>
@@ -43,27 +47,194 @@
                 </div>
               </div>
             </div>
-            <el-button type="primary" size="large" @click="$router.push('/contact')">
-              获取方案
-              <el-icon class="el-icon--right"><ArrowRight /></el-icon>
-            </el-button>
+            <div class="product-actions">
+              <el-button type="primary" size="large" @click="$router.push('/contact')">
+                获取方案
+                <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+              </el-button>
+              <el-button
+                v-if="product.comparable"
+                size="large"
+                plain
+                class="compare-btn"
+                :class="{ 'is-selected': isComparing(product.id) }"
+                :disabled="!isComparing(product.id) && compareIds.length >= 2"
+                @click="toggleCompare(product.id)"
+              >
+                <el-icon class="el-icon--left">
+                  <CircleCheck v-if="isComparing(product.id)" />
+                  <ScaleToOriginal v-else />
+                </el-icon>
+                {{ isComparing(product.id) ? '已加入对照' : '加入方案对照' }}
+              </el-button>
+            </div>
           </div>
           <div class="product-image">
-            <div class="image-placeholder" :style="{ background: product.gradient }">
+            <div
+              class="image-placeholder"
+              :class="{ 'compare-image-flag': isComparing(product.id) }"
+              :style="{ background: product.gradient }"
+            >
               <el-icon :size="80">
                 <component :is="product.icon" />
               </el-icon>
+              <span v-if="isComparing(product.id)" class="image-compare-tag">
+                <el-icon><CircleCheckFilled /></el-icon>
+                对照方案 {{ compareIndex(product.id) + 1 }}
+              </span>
             </div>
           </div>
         </div>
       </div>
     </section>
-    
-    <!-- 技术优势 -->
-    <section class="section section-gray">
+
+    <!-- 方案对照 -->
+    <section id="compare-section" class="section section-gray compare-section">
       <div class="container">
-        <SectionTitle 
-          title="技术优势" 
+        <SectionTitle
+          title="方案对照"
+          subtitle="任选两项核心方案，对照关键能力、技术优势与服务流程，选择最适合的组合"
+        />
+
+        <!-- 未选满两项：选择面板 -->
+        <div v-if="compareIds.length < 2" class="compare-picker card-panel">
+          <div class="picker-header">
+            <el-icon :size="22"><ScaleToOriginal /></el-icon>
+            <h3>选择要对照的方案（{{ compareIds.length }}/2）</h3>
+          </div>
+          <div class="picker-chips">
+            <button
+              v-for="product in comparableProducts"
+              :key="product.id"
+              class="picker-chip"
+              :class="{ selected: isComparing(product.id) }"
+              @click="toggleCompare(product.id)"
+            >
+              <span class="chip-icon" :style="{ background: product.gradient }">
+                <el-icon :size="20"><component :is="product.icon" /></el-icon>
+              </span>
+              <span class="chip-text">
+                <strong>{{ product.shortTitle }}</strong>
+                <em>{{ product.title }}</em>
+              </span>
+              <span class="chip-state">
+                <el-icon><CircleCheck v-if="isComparing(product.id)" /><Plus v-else /></el-icon>
+                {{ isComparing(product.id) ? '已选择' : '选择' }}
+              </span>
+            </button>
+          </div>
+          <p v-if="compareIds.length === 1" class="picker-tip">
+            还需再选择 1 项方案，即可查看完整对照
+          </p>
+          <p v-else class="picker-tip picker-tip-empty">
+            支持「智慧仓储」「运输管理」「配送调度」三项核心方案两两对照
+          </p>
+        </div>
+
+        <!-- 已选满两项：对照内容（桌面端表格） -->
+        <template v-else>
+          <div class="compare-table">
+            <!-- 方案头 -->
+            <div class="compare-row compare-head-row">
+              <div class="compare-cell compare-label-cell"></div>
+              <div
+                v-for="(id, slot) in compareIds"
+                :key="`head-${id}`"
+                class="compare-cell compare-head-cell"
+              >
+                <div class="head-icon" :style="{ background: compareProducts[slot].gradient }">
+                  <el-icon :size="26"><component :is="compareProducts[slot].icon" /></el-icon>
+                </div>
+                <h3>{{ compareProducts[slot].shortTitle }}</h3>
+                <p>{{ compareProducts[slot].title }}</p>
+                <el-select
+                  :model-value="id"
+                  class="head-select"
+                  @update:model-value="(val) => switchCompareSlot(slot, val)"
+                >
+                  <el-option
+                    v-for="opt in slotOptions(slot)"
+                    :key="opt.id"
+                    :label="opt.shortTitle"
+                    :value="opt.id"
+                    :disabled="opt.disabled"
+                  />
+                </el-select>
+              </div>
+            </div>
+
+            <!-- 方案简介 -->
+            <div class="compare-row">
+              <div class="compare-cell compare-label-cell">方案简介</div>
+              <div v-for="product in compareProducts" :key="`desc-${product.id}`" class="compare-cell">
+                {{ product.description }}
+              </div>
+            </div>
+
+            <!-- 关键能力 -->
+            <template v-for="group in compareRows" :key="group.title">
+              <div class="compare-row compare-group-row">
+                <div class="compare-cell compare-group-cell">
+                  <el-icon><component :is="group.icon" /></el-icon>
+                  {{ group.title }}
+                </div>
+              </div>
+              <div v-for="item in group.items" :key="group.title + item.label" class="compare-row">
+                <div class="compare-cell compare-label-cell">{{ item.label }}</div>
+                <div v-for="(id, slot) in compareIds" :key="group.title + item.label + id" class="compare-cell">
+                  {{ item.render(compareProducts[slot]) }}
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- 已选满两项：对照内容（移动端卡片） -->
+          <div class="compare-cards">
+            <div v-for="product in compareProducts" :key="`card-${product.id}`" class="compare-card">
+              <div class="compare-card-head">
+                <div class="head-icon" :style="{ background: product.gradient }">
+                  <el-icon :size="24"><component :is="product.icon" /></el-icon>
+                </div>
+                <div>
+                  <h3>{{ product.shortTitle }}</h3>
+                  <p>{{ product.title }}</p>
+                </div>
+              </div>
+              <div class="compare-card-body">
+                <p class="card-desc">{{ product.description }}</p>
+                <template v-for="group in compareRows" :key="'card-' + group.title">
+                  <h4 class="card-group-title">
+                    <el-icon><component :is="group.icon" /></el-icon>
+                    {{ group.title }}
+                  </h4>
+                  <div v-for="item in group.items" :key="'card-' + group.title + item.label" class="card-row">
+                    <span class="card-row-label">{{ item.label }}</span>
+                    <span class="card-row-value">{{ item.render(product) }}</span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- 带对照结果去咨询 -->
+          <div class="compare-cta">
+            <el-button size="large" @click="clearCompare">
+              清空对照
+            </el-button>
+            <el-button type="primary" size="large" @click="goContactWithCompare">
+              带着对照结果去咨询
+              <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+            </el-button>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- 技术优势 -->
+    <section class="section section-light">
+      <div class="container">
+        <SectionTitle
+          title="技术优势"
           subtitle="领先的技术架构，保障系统稳定高效运行"
         />
         <div class="tech-grid">
@@ -79,12 +250,12 @@
         </div>
       </div>
     </section>
-    
+
     <!-- 服务流程 -->
-    <section class="section section-light">
+    <section class="section section-gray">
       <div class="container">
-        <SectionTitle 
-          title="服务流程" 
+        <SectionTitle
+          title="服务流程"
           subtitle="专业规范的服务流程，确保项目顺利交付"
         />
         <div class="process-steps">
@@ -101,7 +272,7 @@
         </div>
       </div>
     </section>
-    
+
     <!-- CTA -->
     <section class="section cta-section">
       <div class="container text-center">
@@ -113,135 +284,67 @@
         </el-button>
       </div>
     </section>
+
+    <!-- 底部对照悬浮条 -->
+    <transition name="bar-slide">
+      <div v-if="compareIds.length > 0" class="compare-bar">
+        <div class="container compare-bar-inner">
+          <div class="bar-products">
+            <span class="bar-label">方案对照（{{ compareIds.length }}/2）：</span>
+            <template v-if="compareIds.length">
+              <span
+                v-for="(id, index) in compareIds"
+                :key="`bar-${id}`"
+                class="bar-product"
+              >
+                <el-icon class="bar-product-icon"><component :is="getProductById(id).icon" /></el-icon>
+                {{ getProductById(id).shortTitle }}
+                <el-icon class="bar-product-remove" title="移除" @click="toggleCompare(id)">
+                  <Close />
+                </el-icon>
+                <span v-if="index < compareIds.length - 1" class="bar-vs">VS</span>
+              </span>
+            </template>
+          </div>
+          <div class="bar-actions">
+            <el-button size="default" @click="clearCompare">清空</el-button>
+            <el-button
+              size="default"
+              :disabled="compareIds.length < 2"
+              @click="scrollToCompare"
+            >
+              查看对照
+            </el-button>
+            <el-button
+              type="primary"
+              size="default"
+              :disabled="compareIds.length < 2"
+              @click="goContactWithCompare"
+            >
+              带对照结果咨询
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import SectionTitle from '@/components/SectionTitle.vue'
+import {
+  products,
+  comparableProducts,
+  getProductById,
+  parseCompareIds,
+  buildContactQuery
+} from '@/data/products.js'
 
 const route = useRoute()
 const router = useRouter()
-
-const products = [
-  {
-    id: 'wms',
-    tag: '核心产品',
-    shortTitle: '智慧仓储',
-    title: '智慧仓储管理系统 (WMS)',
-    description: '全面的仓库管理解决方案，通过智能算法优化库位分配、拣货路径，实现仓库作业效率最大化。支持多仓库、多货主管理，满足不同业务场景需求。',
-    icon: 'Box',
-    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    reverse: false,
-    features: [
-      { title: '智能库位管理', desc: 'AI算法自动分配最优库位，提升空间利用率' },
-      { title: '高效拣货作业', desc: '智能路径规划，减少拣货行走距离40%' },
-      { title: '实时库存监控', desc: '库存数据实时同步，准确率达99.9%' },
-      { title: '批次追溯管理', desc: '全程追溯，满足质量管理要求' }
-    ],
-    technologies: [
-      { icon: 'Cpu', title: 'AI库位引擎', description: '基于机器学习的库位动态分配算法，持续优化仓储空间' },
-      { icon: 'Connection', title: 'IoT设备互联', description: '无缝对接AGV、扫码枪、电子标签等智能硬件' },
-      { icon: 'Lock', title: '数据安全', description: '仓库数据加密存储，操作日志全程可审计' },
-      { icon: 'Monitor', title: '智能监控', description: '仓库温湿度、设备状态实时监控与预警' }
-    ],
-    steps: [
-      { title: '仓储诊断', description: '深入分析现有仓储流程与痛点' },
-      { title: '方案定制', description: '量身打造WMS解决方案' },
-      { title: '系统部署', description: '专业团队实施，支持灰度上线' },
-      { title: '操作培训', description: '仓管人员全流程操作培训' },
-      { title: '持续优化', description: '定期复盘，持续迭代优化' }
-    ]
-  },
-  {
-    id: 'tms',
-    tag: '核心产品',
-    shortTitle: '运输管理',
-    title: '运输管理系统 (TMS)',
-    description: '高效的运输调度平台，整合运力资源，优化运输路线，降低运输成本。支持多种运输方式，实现运输全程可视化追踪。',
-    icon: 'Van',
-    gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-    reverse: true,
-    features: [
-      { title: '智能路径规划', desc: '基于实时路况的最优路线推荐' },
-      { title: '运力资源整合', desc: '对接多家承运商，灵活调度运力' },
-      { title: '运费自动核算', desc: '多维度计费规则，自动生成账单' },
-      { title: '全程可视追踪', desc: '实时定位，异常预警及时推送' }
-    ],
-    technologies: [
-      { icon: 'Cpu', title: '路径优化引擎', description: '多约束条件下最优路径计算，降低运输成本' },
-      { icon: 'Connection', title: '多承运商对接', description: '标准化API对接主流物流平台与承运商' },
-      { icon: 'Lock', title: '安全传输', description: '运输数据加密传输，保障商业机密安全' },
-      { icon: 'Monitor', title: '实时追踪', description: 'GPS+基站双模定位，运输全程可视化' }
-    ],
-    steps: [
-      { title: '运输分析', description: '梳理运输链路与成本结构' },
-      { title: '方案设计', description: '制定运输管理优化方案' },
-      { title: '系统集成', description: '对接承运商与车辆设备' },
-      { title: '调度培训', description: '调度团队系统操作培训' },
-      { title: '运营支持', description: '持续监控运营指标，优化调度策略' }
-    ]
-  },
-  {
-    id: 'dms',
-    tag: '核心产品',
-    shortTitle: '配送调度',
-    title: '配送调度系统 (DMS)',
-    description: '智能配送解决方案，优化末端配送效率。通过智能派单、路线优化，提升配送时效，降低配送成本。',
-    icon: 'Location',
-    gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-    reverse: false,
-    features: [
-      { title: '智能订单分配', desc: '基于配送员位置、能力智能派单' },
-      { title: '配送路线优化', desc: '多点配送路线最优规划' },
-      { title: '电子签收', desc: '拍照、签名电子化，凭证可追溯' },
-      { title: '配送员管理', desc: '绩效考核、工作量统计一目了然' }
-    ],
-    technologies: [
-      { icon: 'Cpu', title: '智能派单引擎', description: '基于配送员实时位置与能力的最优派单算法' },
-      { icon: 'Connection', title: '订单无缝对接', description: '对接电商、ERP等多渠道订单来源' },
-      { icon: 'Lock', title: '签收安全', description: '电子签收数据加密存储，防篡改可追溯' },
-      { icon: 'Monitor', title: '配送监控', description: '配送进度实时跟踪，异常订单自动预警' }
-    ],
-    steps: [
-      { title: '配送诊断', description: '分析末端配送效率与瓶颈' },
-      { title: '方案定制', description: '设计智能配送解决方案' },
-      { title: '系统上线', description: '配送团队系统部署与调试' },
-      { title: '骑手培训', description: '配送员APP操作与流程培训' },
-      { title: '持续运营', description: '配送数据复盘，持续提升效率' }
-    ]
-  },
-  {
-    id: 'data',
-    tag: '增值服务',
-    shortTitle: '数据分析',
-    title: '数据分析平台',
-    description: '强大的数据分析能力，将物流数据转化为业务洞察。多维度报表、可视化大屏，助力管理决策。',
-    icon: 'DataAnalysis',
-    gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
-    reverse: true,
-    features: [
-      { title: '多维度报表', desc: '运营、财务、绩效报表一键生成' },
-      { title: '可视化大屏', desc: '实时数据大屏，运营状态一目了然' },
-      { title: '智能预警', desc: '异常数据自动预警，及时发现问题' },
-      { title: '趋势分析', desc: '历史数据分析，预测业务趋势' }
-    ],
-    technologies: [
-      { icon: 'Cpu', title: '大数据引擎', description: '分布式计算架构，支持海量物流数据实时分析' },
-      { icon: 'Connection', title: '数据集成', description: '打通WMS/TMS/DMS多系统数据孤岛' },
-      { icon: 'Lock', title: '数据治理', description: '数据质量管控与权限分级管理' },
-      { icon: 'Monitor', title: '实时计算', description: '流式计算引擎，秒级数据更新与告警' }
-    ],
-    steps: [
-      { title: '数据盘点', description: '梳理数据资产与分析需求' },
-      { title: '数仓搭建', description: '构建统一数据仓库与分析模型' },
-      { title: '报表开发', description: '定制化报表与大屏开发' },
-      { title: '分析培训', description: '管理层数据分析能力培训' },
-      { title: '持续迭代', description: '按需新增分析维度与指标' }
-    ]
-  }
-]
 
 const activeTab = ref('wms')
 
@@ -257,6 +360,50 @@ const activeSteps = computed(() => {
   return activeProduct.value.steps
 })
 
+// 对照项始终从 URL 派生（单一数据源：刷新 / 前进后退天然恢复，状态切换无残留）
+const compareIds = computed(() => parseCompareIds(route.query.compare))
+const compareProducts = computed(() => compareIds.value.map(getProductById))
+
+const isComparing = (id) => compareIds.value.includes(id)
+const compareIndex = (id) => compareIds.value.indexOf(id)
+
+// 对照维度：关键能力 / 技术优势 / 服务流程
+const compareRows = computed(() => [
+  {
+    title: '关键能力',
+    icon: 'Star',
+    items: [
+      { label: '核心能力一', render: (p) => p.features[0].title },
+      { label: '核心能力二', render: (p) => p.features[1].title },
+      { label: '核心能力三', render: (p) => p.features[2].title },
+      { label: '核心能力四', render: (p) => p.features[3].title },
+      { label: '能力说明', render: (p) => p.features.map(f => f.desc).join('；') }
+    ]
+  },
+  {
+    title: '技术优势',
+    icon: 'Cpu',
+    items: [
+      { label: '智能引擎', render: (p) => p.technologies[0].title },
+      { label: '引擎说明', render: (p) => p.technologies[0].description },
+      { label: '集成互联', render: (p) => `${p.technologies[1].title}：${p.technologies[1].description}` },
+      { label: '安全保障', render: (p) => `${p.technologies[2].title}：${p.technologies[2].description}` },
+      { label: '监控能力', render: (p) => `${p.technologies[3].title}：${p.technologies[3].description}` }
+    ]
+  },
+  {
+    title: '服务流程',
+    icon: 'List',
+    items: [
+      { label: '第一步', render: (p) => `${p.steps[0].title}（${p.steps[0].description}）` },
+      { label: '第二步', render: (p) => `${p.steps[1].title}（${p.steps[1].description}）` },
+      { label: '第三步', render: (p) => `${p.steps[2].title}（${p.steps[2].description}）` },
+      { label: '第四步', render: (p) => `${p.steps[3].title}（${p.steps[3].description}）` },
+      { label: '第五步', render: (p) => `${p.steps[4].title}（${p.steps[4].description}）` }
+    ]
+  }
+])
+
 const scrollToProduct = (productId) => {
   nextTick(() => {
     const el = document.getElementById(`product-${productId}`)
@@ -267,9 +414,79 @@ const scrollToProduct = (productId) => {
   })
 }
 
+const scrollToCompare = () => {
+  nextTick(() => {
+    const el = document.getElementById('compare-section')
+    if (el) {
+      const top = el.getBoundingClientRect().top + window.scrollY - 80
+      window.scrollTo({ top, behavior: 'smooth' })
+    }
+  })
+}
+
+// 仅更新对照参数，保留 tab / hash
+const updateCompareQuery = async (ids) => {
+  const query = { ...route.query }
+  if (ids.length) {
+    query.compare = ids.join(',')
+  } else {
+    delete query.compare
+  }
+  await router.push({ query, hash: route.hash || undefined })
+}
+
+const toggleCompare = async (productId) => {
+  if (!comparableProducts.some(p => p.id === productId)) return
+  const ids = [...compareIds.value]
+  const index = ids.indexOf(productId)
+  if (index > -1) {
+    ids.splice(index, 1)
+  } else {
+    if (ids.length >= 2) {
+      ElMessage.warning('最多只能选择两项方案进行对照，请先取消一项')
+      return
+    }
+    ids.push(productId)
+  }
+  await updateCompareQuery(ids)
+  // 选满两项后自动定位到对照区
+  if (ids.length === 2) {
+    scrollToCompare()
+  }
+}
+
+// 对照表内下拉切换某一列的方案
+const switchCompareSlot = async (slot, newId) => {
+  if (compareIds.value[slot] === newId) return
+  if (compareIds.value.includes(newId)) return
+  const ids = [...compareIds.value]
+  ids[slot] = newId
+  await updateCompareQuery(ids)
+}
+
+// 下拉候选项：另一列已选的方案禁用，避免重复
+const slotOptions = (slot) =>
+  comparableProducts.map(p => ({
+    ...p,
+    disabled: compareIds.value.some((id, i) => id === p.id && i !== slot)
+  }))
+
+const clearCompare = async () => {
+  await updateCompareQuery([])
+}
+
+const goContactWithCompare = () => {
+  if (compareIds.value.length !== 2) return
+  router.push({ path: '/contact', query: buildContactQuery(compareIds.value) })
+}
+
 const switchTab = (productId) => {
   activeTab.value = productId
-  router.replace({ query: { tab: productId }, hash: `#product-${productId}` })
+  // 保留已有对照参数，避免切标签清空选择
+  router.replace({
+    query: { ...route.query, tab: productId },
+    hash: `#product-${productId}`
+  })
   scrollToProduct(productId)
 }
 
@@ -281,12 +498,37 @@ onMounted(() => {
     activeTab.value = initialTab
     scrollToProduct(initialTab)
   }
+
+  // 从咨询页「返回调整对照」时定位到对照区
+  if (route.hash === '#compare-section') {
+    scrollToCompare()
+  }
+
+  // 规整无效对照参数（含非法 id、重复、超过两项等情况）
+  const normalized = parseCompareIds(route.query.compare)
+  if (String(route.query.compare || '') !== normalized.join(',')) {
+    const query = { ...route.query }
+    if (normalized.length) query.compare = normalized.join(',')
+    else delete query.compare
+    router.replace({ query, hash: route.hash || undefined })
+  }
 })
 
 watch(() => route.query.tab, (newTab) => {
   if (newTab && products.some(p => p.id === newTab) && newTab !== activeTab.value) {
     activeTab.value = newTab
     scrollToProduct(newTab)
+  }
+})
+
+// 前进 / 后退或外部改 URL 后，规整无效对照参数
+watch(() => route.query.compare, (raw) => {
+  const normalized = parseCompareIds(raw)
+  if (String(raw || '') !== normalized.join(',')) {
+    const query = { ...route.query }
+    if (normalized.length) query.compare = normalized.join(',')
+    else delete query.compare
+    router.replace({ query, hash: route.hash || undefined })
   }
 })
 </script>
@@ -321,6 +563,7 @@ watch(() => route.query.tab, (newTab) => {
 }
 
 .tab-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -346,6 +589,16 @@ watch(() => route.query.tab, (newTab) => {
   }
 }
 
+.tab-compare-badge {
+  margin-left: 4px;
+  padding: 1px 8px;
+  border-radius: $radius-sm;
+  background: $warning-color;
+  color: #fff;
+  font-size: $font-size-xs;
+  line-height: 18px;
+}
+
 .product-detail {
   display: flex;
   gap: $spacing-xxl;
@@ -353,7 +606,7 @@ watch(() => route.query.tab, (newTab) => {
   padding: $spacing-xxl 0;
   border-bottom: 1px solid $border-light;
   transition: background 0.3s;
-  
+
   &:last-child {
     border-bottom: none;
   }
@@ -366,9 +619,22 @@ watch(() => route.query.tab, (newTab) => {
   margin: 0 (-$spacing-xl);
 }
 
+// 被选中对照的方案区块（与标签高亮相互独立，状态移除即消失，无残留）
+.compare-selected {
+  background: rgba($warning-color, 0.06);
+  border-radius: $radius-lg;
+  padding: $spacing-xxl;
+  margin: 0 (-$spacing-xl);
+  box-shadow: inset 4px 0 0 $warning-color;
+}
+
+.product-highlight.compare-selected {
+  background: linear-gradient(90deg, rgba($primary-color, 0.04) 0%, rgba($warning-color, 0.06) 100%);
+}
+
 .product-content {
   flex: 1;
-  
+
   &.order-2 {
     order: 2;
   }
@@ -407,21 +673,49 @@ watch(() => route.query.tab, (newTab) => {
   display: flex;
   gap: $spacing-sm;
   margin-bottom: $spacing-md;
-  
+
   .el-icon {
     color: $success-color;
     margin-top: 4px;
   }
-  
+
   h4 {
     font-size: $font-size-base;
     color: $text-primary;
     margin-bottom: 2px;
   }
-  
+
   p {
     font-size: $font-size-sm;
     color: $text-secondary;
+  }
+}
+
+.product-actions {
+  display: flex;
+  gap: $spacing-md;
+  flex-wrap: wrap;
+}
+
+.compare-btn {
+  &.is-selected {
+    color: $warning-color;
+    background: rgba($warning-color, 0.1);
+    border-color: $warning-color;
+
+    &:hover,
+    &:focus {
+      color: #fff;
+      background: $warning-color;
+      border-color: $warning-color;
+    }
+  }
+
+  &.is-disabled,
+  &.is-disabled:hover {
+    color: $text-placeholder;
+    border-color: $border-light;
+    background: $bg-color;
   }
 }
 
@@ -430,6 +724,7 @@ watch(() => route.query.tab, (newTab) => {
 }
 
 .image-placeholder {
+  position: relative;
   width: 100%;
   height: 350px;
   border-radius: $radius-lg;
@@ -437,6 +732,317 @@ watch(() => route.query.tab, (newTab) => {
   align-items: center;
   justify-content: center;
   color: #fff;
+  transition: box-shadow 0.3s;
+
+  &.compare-image-flag {
+    box-shadow: 0 0 0 3px $warning-color;
+  }
+}
+
+.image-compare-tag {
+  position: absolute;
+  top: $spacing-md;
+  right: $spacing-md;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: $radius-md;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  font-size: $font-size-sm;
+}
+
+/* 方案对照区 */
+.compare-section {
+  scroll-margin-top: 80px;
+}
+
+.card-panel {
+  background: $bg-white;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
+  padding: $spacing-xl;
+}
+
+.picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+  color: $text-primary;
+
+  h3 {
+    font-size: $font-size-lg;
+    font-weight: 600;
+  }
+}
+
+.picker-chips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-md;
+}
+
+.picker-chip {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-md;
+  border: 2px solid $border-light;
+  border-radius: $radius-lg;
+  background: $bg-white;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.25s;
+
+  &:hover {
+    border-color: $primary-light;
+    transform: translateY(-2px);
+  }
+
+  &.selected {
+    border-color: $warning-color;
+    background: rgba($warning-color, 0.05);
+  }
+}
+
+.chip-icon {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border-radius: $radius-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.chip-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+
+  strong {
+    font-size: $font-size-base;
+    color: $text-primary;
+  }
+
+  em {
+    font-style: normal;
+    font-size: $font-size-xs;
+    color: $text-secondary;
+  }
+}
+
+.chip-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: $font-size-xs;
+  color: $text-secondary;
+
+  .selected & {
+    color: $warning-color;
+  }
+}
+
+.picker-tip {
+  margin-top: $spacing-md;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $warning-color;
+
+  &.picker-tip-empty {
+    color: $text-secondary;
+  }
+}
+
+/* 对照表（桌面端） */
+.compare-table {
+  display: grid;
+  background: $bg-white;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
+  overflow: hidden;
+}
+
+.compare-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr;
+}
+
+.compare-cell {
+  padding: $spacing-md $spacing-lg;
+  font-size: $font-size-sm;
+  color: $text-regular;
+  line-height: $line-height-loose;
+  border-bottom: 1px solid $border-light;
+  border-right: 1px solid $border-light;
+
+  &:last-child {
+    border-right: none;
+  }
+}
+
+.compare-label-cell {
+  background: $bg-color;
+  color: $text-primary;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.compare-head-row .compare-cell {
+  border-bottom: 2px solid $primary-color;
+}
+
+.compare-head-cell {
+  text-align: center;
+
+  h3 {
+    font-size: $font-size-lg;
+    color: $text-primary;
+    margin: $spacing-sm 0 2px;
+  }
+
+  p {
+    font-size: $font-size-xs;
+    color: $text-secondary;
+    margin-bottom: $spacing-sm;
+  }
+}
+
+.head-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.head-select {
+  width: 160px;
+}
+
+.compare-group-row {
+  grid-template-columns: 1fr;
+
+  .compare-group-cell {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    background: rgba($primary-color, 0.06);
+    color: $primary-color;
+    font-weight: 600;
+    padding: $spacing-sm $spacing-lg;
+    border-bottom: 1px solid $border-light;
+    border-right: none;
+  }
+}
+
+.compare-cards {
+  display: none;
+}
+
+.compare-cta {
+  display: flex;
+  justify-content: center;
+  gap: $spacing-md;
+  margin-top: $spacing-xl;
+}
+
+/* 底部对照悬浮条 */
+.compare-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  background: rgba(26, 26, 46, 0.96);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  color: #fff;
+}
+
+.compare-bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+  padding-top: $spacing-md;
+  padding-bottom: $spacing-md;
+  flex-wrap: wrap;
+}
+
+.bar-products {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-wrap: wrap;
+}
+
+.bar-label {
+  font-size: $font-size-sm;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.bar-product {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: $radius-md;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: $font-size-sm;
+}
+
+.bar-product-icon {
+  color: $warning-color;
+}
+
+.bar-product-remove {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.55);
+  transition: color 0.2s;
+
+  &:hover {
+    color: $danger-color;
+  }
+}
+
+.bar-vs {
+  position: absolute;
+  right: -20px;
+  font-size: $font-size-xs;
+  font-weight: 700;
+  color: $warning-color;
+}
+
+.bar-actions {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.bar-slide-enter-active,
+.bar-slide-leave-active {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.bar-slide-enter-from,
+.bar-slide-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+.has-compare-bar {
+  padding-bottom: 76px;
 }
 
 .tech-grid {
@@ -452,7 +1058,7 @@ watch(() => route.query.tab, (newTab) => {
   text-align: center;
   box-shadow: $shadow-md;
   transition: all 0.3s;
-  
+
   &:hover {
     transform: translateY(-8px);
     box-shadow: $shadow-lg;
@@ -514,7 +1120,7 @@ watch(() => route.query.tab, (newTab) => {
     color: $text-primary;
     margin-bottom: $spacing-xs;
   }
-  
+
   p {
     font-size: $font-size-sm;
     color: $text-secondary;
@@ -550,35 +1156,122 @@ watch(() => route.query.tab, (newTab) => {
   .product-detail {
     flex-direction: column;
   }
-  
+
   .product-content.order-2 {
     order: 0;
   }
-  
+
   .product-image {
     flex: none;
     width: 100%;
   }
-  
+
   .tech-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .process-steps {
     flex-wrap: wrap;
     gap: $spacing-lg;
   }
-  
+
   .step-item {
     flex: 0 0 calc(33.333% - 16px);
   }
-  
+
   .step-arrow {
     display: none;
   }
 
-  .product-highlight {
+  .product-highlight,
+  .compare-selected {
     margin: 0;
+    padding: $spacing-lg;
+  }
+
+  .picker-chips {
+    grid-template-columns: 1fr;
+  }
+
+  /* 平板/移动端切换为卡片式对照 */
+  .compare-table {
+    display: none;
+  }
+
+  .compare-cards {
+    display: block;
+  }
+
+  .compare-card {
+    background: $bg-white;
+    border-radius: $radius-lg;
+    box-shadow: $shadow-md;
+    overflow: hidden;
+    margin-bottom: $spacing-md;
+  }
+
+  .compare-card-head {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-md $spacing-lg;
+    border-bottom: 2px solid $primary-color;
+
+    h3 {
+      font-size: $font-size-lg;
+      color: $text-primary;
+    }
+
+    p {
+      font-size: $font-size-xs;
+      color: $text-secondary;
+    }
+
+    .head-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0;
+    }
+  }
+
+  .compare-card-body {
+    padding: $spacing-md $spacing-lg;
+  }
+
+  .card-desc {
+    font-size: $font-size-sm;
+    color: $text-secondary;
+    line-height: $line-height-loose;
+    margin-bottom: $spacing-md;
+  }
+
+  .card-group-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: $font-size-base;
+    color: $primary-color;
+    margin: $spacing-md 0 $spacing-sm;
+  }
+
+  .card-row {
+    display: flex;
+    gap: $spacing-md;
+    padding: $spacing-xs 0;
+    font-size: $font-size-sm;
+    line-height: $line-height-base;
+    border-bottom: 1px dashed $border-light;
+  }
+
+  .card-row-label {
+    flex: 0 0 72px;
+    color: $text-primary;
+    font-weight: 600;
+  }
+
+  .card-row-value {
+    flex: 1;
+    color: $text-regular;
   }
 }
 
@@ -586,15 +1279,15 @@ watch(() => route.query.tab, (newTab) => {
   .page-title {
     font-size: $font-size-xxl;
   }
-  
+
   .product-title {
     font-size: $font-size-xl;
   }
-  
+
   .tech-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .step-item {
     flex: 0 0 100%;
   }
@@ -602,6 +1295,14 @@ watch(() => route.query.tab, (newTab) => {
   .tab-btn {
     padding: 8px 16px;
     font-size: $font-size-sm;
+  }
+
+  .compare-bar-inner {
+    justify-content: center;
+  }
+
+  .has-compare-bar {
+    padding-bottom: 130px;
   }
 }
 </style>
