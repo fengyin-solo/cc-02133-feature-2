@@ -82,8 +82,22 @@
             <div class="form-card">
               <h3>在线留言</h3>
               <p class="form-desc">填写以下表单，我们将尽快与您联系</p>
-              
-              <el-form 
+
+              <el-alert
+                v-if="compareConsultProducts.length === 2"
+                class="compare-alert"
+                type="info"
+                show-icon
+                :closable="false"
+              >
+                <template #title>
+                  您正在咨询方案对照：<strong>{{ compareConsultProducts[0].title }}</strong>
+                  ×
+                  <strong>{{ compareConsultProducts[1].title }}</strong>
+                </template>
+              </el-alert>
+
+              <el-form
                 ref="formRef"
                 :model="form" 
                 :rules="rules" 
@@ -179,9 +193,13 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import SectionTitle from '@/components/SectionTitle.vue'
+import { products, parseCompareIds, COMPARE_MAX } from '@/data/products'
+
+const route = useRoute()
 
 const formRef = ref(null)
 const submitting = ref(false)
@@ -194,6 +212,25 @@ const form = reactive({
   company: '',
   message: ''
 })
+
+// 从产品页带过来的方案对照结果，仅当恰好两项有效对照时才生效
+const compareConsultProducts = computed(() => {
+  const ids = parseCompareIds(route.query.compare)
+  if (ids.length !== COMPARE_MAX) return []
+  return ids.map(id => products.find(p => p.id === id)).filter(Boolean)
+})
+
+// 对照结果带入咨询：留言内容为空时预填，不覆盖用户已输入内容
+const prefillCompareMessage = () => {
+  if (compareConsultProducts.value.length !== COMPARE_MAX) return
+  if (form.message) return
+  const [first, second] = compareConsultProducts.value
+  form.message = `您好，我在官网对照了「${first.title}」与「${second.title}」两个方案，想进一步了解两者的差异与选型建议，请与我联系。`
+}
+
+onMounted(prefillCompareMessage)
+
+watch(() => route.query.compare, prefillCompareMessage)
 
 const rules = {
   name: [
@@ -385,6 +422,14 @@ const faqs = [
     font-size: $font-size-sm;
     color: $text-secondary;
     margin-bottom: $spacing-lg;
+  }
+
+  .compare-alert {
+    margin-bottom: $spacing-lg;
+
+    strong {
+      color: $primary-color;
+    }
   }
 }
 
